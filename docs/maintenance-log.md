@@ -1513,3 +1513,15 @@
   - 密码阶段取得匹配的 `two_factor_authentication.required` 响应后，立即进入既有的验证器 TOTP 提交流程，不再回落到密码表单重提交。
   - 新 `/getcaptcha/` payload 不再取消同 generation 的延迟失败；当前验证码等待会在 5 秒宽限后收到 failure，下一次有界重试再消费已经排队的新 payload，避免无意义的 30 秒响应超时。
   - 按仓库规则不执行测试；Python 编译和 diff 检查已通过。本机没有 `uv`、Black、Ruff，且协议契约检查缺少 `matplotlib` 依赖，因此这些检查留给 GitHub Actions 的隔离环境执行，不在本机安装依赖。仍需一次新的 Actions 运行确认真实 TOTP 登录、Store session 与逐款入库结果。
+
+### 2026-09-08 兼容 Epic App 默认两步验证入口
+
+- 现象：Actions run `34224603671` 已在密码验证码成功后进入 TOTP 分支，并生成新的六位验证码；失败截图显示 Epic 实际停在 `Check the Epic Games Store app` 数字确认页，页面只有 `Try another way`，因此程序报 `Could not find Epic authenticator 2FA code input`。
+- 根因判断：Epic 当前把 `epicapp` 作为默认 MFA 方式，验证器输入框需要先打开其他验证方式，再选择 Authenticator。旧选择器只查找页面上已经出现的 Authenticator 入口；等待函数还会仅凭 MFA URL/文字提前返回，即使页面没有任何可填写控件。
+- 改动文件：
+  - `app/services/epic_totp_service.py`
+  - `docs/maintenance-log.md`
+- 处理结果：
+  - MFA 页面没有直接显示 Authenticator 时，先点击 `Try another way` 等方式切换入口；下一轮再选择 Authenticator，等待真实输入框出现后才生成并填写 TOTP。
+  - 对非标准输入控件仍保留键盘填写兜底，但只有确实找到可聚焦的验证码控件才结束等待，不再把纯 App 数字确认页误判为可填写页面。
+  - 按仓库规则不执行测试；使用本机可用的 Python 编译和 diff 检查验证，真实 Epic MFA 页面仍需新的单次 Actions 运行确认。

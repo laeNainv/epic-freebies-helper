@@ -75,17 +75,31 @@ async def _select_authenticator_mfa_method(page: Page) -> bool:
               };
               const preferred = ['authenticator', 'authentication app', 'verification app'];
               const candidates = Array.from(document.querySelectorAll('button,a,label'))
-                .filter(isVisible)
-                .filter((element) => {
-                  const text = normalize(element.innerText || element.textContent);
-                  return preferred.some((marker) => text.includes(marker));
-                });
-              const target = candidates[0];
-              if (!target) {
-                return false;
+                .filter(isVisible);
+              const target = candidates.find((element) => {
+                const text = normalize(element.innerText || element.textContent);
+                return preferred.some((marker) => text.includes(marker));
+              });
+              if (target) {
+                target.click();
+                return true;
               }
-              target.click();
-              return true;
+
+              const methodSwitchers = [
+                'try another way',
+                'choose another way',
+                'use another method',
+                'other verification methods',
+              ];
+              const switcher = candidates.find((element) => {
+                const text = normalize(element.innerText || element.textContent);
+                return methodSwitchers.some((marker) => text.includes(marker));
+              });
+              if (switcher) {
+                switcher.click();
+                return true;
+              }
+              return false;
             }
             """
         )
@@ -292,7 +306,7 @@ async def _wait_for_totp_input(page: Page, timeout_ms: int = 20000) -> bool:
         ):
             return True
 
-        if await _page_has_mfa_signal(page):
+        if await _page_has_mfa_signal(page) and await _focus_totp_entry(page):
             return True
 
         await page.wait_for_timeout(500)
