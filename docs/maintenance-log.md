@@ -1496,3 +1496,20 @@
 - 线上验证：Actions run `33235566379` 使用提交 `0d369fc`，依赖、Camoufox 和 hCaptcha 契约检查均通过。密码登录先后完成两轮 `Challenge success`，第二轮为此前漏判的提交阻塞 challenge；后续入口明确记录 `Epic Games is already logged in`。
 - 领取证据：官方促销结果包含 `Breathedge` 和 `Rival Stars Horse Racing: Desktop Edition`；两款页面均两次记录 purchase button marker `IN LIBRARY`，最终记录 `Confirmed 2 instant claim(s)` 与 `Process completed (No cart items pending)`。
 - 结论：本次运行已确认两款当周免费游戏入库，登录 challenge 变体修复完成运行时验收。该结论基于逐款入库日志，不仅基于 workflow 绿色状态。
+
+### 2026-09-08 修复密码验证码到 TOTP 的切换竞态与验证码响应超时
+
+- 现象：
+  - Actions run `34213391442` 多次完成密码阶段的 `Challenge success`，Epic 随后明确返回 `two_factor_authentication.required`，但程序没有生成或提交 TOTP，而是再次查找密码表单并以 `Epic password form could not be resubmitted after captcha` 中止。
+  - 同一次运行还出现两次 `Wait for captcha response timeout 30.0s`；上游 PR #27 审核记录了相同时序：非 pass 响应已安排有界失败后，新 `/getcaptcha/` payload 会取消该失败，当前等待器因此一直等到总超时。
+- 根因判断：
+  - 密码验证码分支在等待匹配的登录 POST 时会从错误队列移除响应；识别到 `two_factor_authentication.required` 后却只继续循环，导致集中式错误处理再也看不到该信号。页面仍处于密码到 MFA 的过渡期时，有界密码重提交分支随即误触发。
+  - `/getcaptcha/` 表示 hCaptcha 已提供下一道题，不表示上一道题的非 pass 结果应被丢弃；取消延迟失败会同时留下新 payload 和一个永远等不到结果的当前响应等待器。
+- 改动文件：
+  - `app/services/epic_authorization_service.py`
+  - `app/extensions/hcaptcha_adapter.py`
+  - `docs/maintenance-log.md`
+- 处理结果：
+  - 密码阶段取得匹配的 `two_factor_authentication.required` 响应后，立即进入既有的验证器 TOTP 提交流程，不再回落到密码表单重提交。
+  - 新 `/getcaptcha/` payload 不再取消同 generation 的延迟失败；当前验证码等待会在 5 秒宽限后收到 failure，下一次有界重试再消费已经排队的新 payload，避免无意义的 30 秒响应超时。
+  - 按仓库规则不执行测试；Python 编译和 diff 检查已通过。本机没有 `uv`、Black、Ruff，且协议契约检查缺少 `matplotlib` 依赖，因此这些检查留给 GitHub Actions 的隔离环境执行，不在本机安装依赖。仍需一次新的 Actions 运行确认真实 TOTP 登录、Store session 与逐款入库结果。

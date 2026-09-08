@@ -969,7 +969,10 @@ def _apply_empty_checkcaptcha_patch() -> None:
                 # Before the first attempt there may be a legitimate payload response that was
                 # already in flight when tracking was installed. Let the dependency queue it;
                 # once an attempt is active, every real Playwright response must be registered.
-                _cancel_pending_empty_response(self)
+                # Keep a delayed non-pass result alive when hCaptcha immediately serves the
+                # next payload. The current waiter must receive that bounded failure before the
+                # next solve consumes the new payload; cancelling it here leaves the waiter
+                # blocked until RESPONSE_TIMEOUT.
                 try:
                     result = await original_task_handler(self, response)
                 finally:

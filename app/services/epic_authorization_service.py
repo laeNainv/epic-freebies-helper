@@ -1055,6 +1055,7 @@ class EpicAuthorization:
                         )
                         error_code = response.get("errorCode", "")
                         if self._is_two_factor_required_error(error_code):
+                            await submit_fresh_totp("two_factor_required")
                             continue
 
                     if (
