@@ -60,7 +60,7 @@ async def _current_totp_code(page: Page, *, force_next_window: bool = False) -> 
 
 async def _select_authenticator_mfa_method(page: Page) -> bool:
     with suppress(Exception):
-        clicked = await page.evaluate(
+        action = await page.evaluate(
             """
             () => {
               const normalize = (value) =>
@@ -73,8 +73,22 @@ async def _select_authenticator_mfa_method(page: Page) -> bool:
                   style.display !== 'none' &&
                   style.opacity !== '0';
               };
-              const preferred = ['authenticator', 'authentication app', 'verification app'];
-              const candidates = Array.from(document.querySelectorAll('button,a,label'))
+              const clickableSelector = [
+                'button',
+                'a',
+                'label',
+                "[role='button']",
+                "[role='radio']",
+                "[role='option']",
+                "[tabindex]:not([tabindex='-1'])",
+              ].join(',');
+              const preferred = [
+                'authenticator',
+                'authenticator app',
+                'authentication app',
+                'verification app',
+              ];
+              const candidates = Array.from(document.querySelectorAll(clickableSelector))
                 .filter(isVisible);
               const target = candidates.find((element) => {
                 const text = normalize(element.innerText || element.textContent);
@@ -82,7 +96,20 @@ async def _select_authenticator_mfa_method(page: Page) -> bool:
               });
               if (target) {
                 target.click();
-                return true;
+                return 'authenticator';
+              }
+
+              // Epic's current method picker renders each option as a plain card.
+              // Click its exact visible label so the event bubbles to the card handler.
+              const labelTarget = Array.from(document.querySelectorAll('body *'))
+                .filter(isVisible)
+                .find((element) => {
+                  const text = normalize(element.innerText || element.textContent);
+                  return preferred.includes(text);
+                });
+              if (labelTarget) {
+                labelTarget.click();
+                return 'authenticator_card';
               }
 
               const methodSwitchers = [
@@ -97,13 +124,14 @@ async def _select_authenticator_mfa_method(page: Page) -> bool:
               });
               if (switcher) {
                 switcher.click();
-                return true;
+                return 'method_switcher';
               }
-              return false;
+              return null;
             }
             """
         )
-        if clicked:
+        if action:
+            logger.debug("Selected Epic MFA page control | action={}", action)
             await page.wait_for_timeout(1000)
             return True
     return False

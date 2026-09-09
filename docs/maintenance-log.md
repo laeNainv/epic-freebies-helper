@@ -1525,3 +1525,15 @@
   - MFA 页面没有直接显示 Authenticator 时，先点击 `Try another way` 等方式切换入口；下一轮再选择 Authenticator，等待真实输入框出现后才生成并填写 TOTP。
   - 对非标准输入控件仍保留键盘填写兜底，但只有确实找到可聚焦的验证码控件才结束等待，不再把纯 App 数字确认页误判为可填写页面。
   - 按仓库规则不执行测试；使用本机可用的 Python 编译和 diff 检查验证，真实 Epic MFA 页面仍需新的单次 Actions 运行确认。
+
+### 2026-09-09 兼容 Epic 普通卡片式 Authenticator 选项
+
+- 现象：Actions run `34248629797` 使用提交 `9656644` 后，密码阶段的 hCaptcha 两次成功，也已从 Epic App 数字确认页进入 `Choose a Verification Method`，但仍等待不到验证码输入框；失败截图显示页面停在含 `Authenticator App` 的验证方式选择页。
+- 根因判断：该版 Epic 将验证方式渲染为普通卡片，`Authenticator App` 不在既有的 `button`、`a` 或 `label` 元素中，因而脚本没有点击卡片，也就不会进入六位验证码页面。
+- 改动文件：
+  - `app/services/epic_totp_service.py`
+  - `docs/maintenance-log.md`
+- 处理结果：
+  - Authenticator 定位范围加入常见交互角色和可聚焦元素；若卡片没有任何交互语义，则精确匹配可见的 `Authenticator App` 标签并点击，让事件冒泡到卡片处理器。
+  - 为方式切换、交互式 Authenticator 和普通卡片三种点击路径记录不含敏感值的调试动作，便于下一次 Actions 明确判断页面走到了哪一步。
+  - 按仓库规则不执行测试；Python 编译、diff 检查与选择器静态路径核对已通过。真实 Epic MFA 页面仍需新的单次 Actions 运行确认。
