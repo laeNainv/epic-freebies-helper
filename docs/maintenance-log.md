@@ -1550,3 +1550,15 @@
   - TOTP 输入等待新增通用异步等待钩子；认证服务复用既有 Agent 和 hCaptcha 求解路径，在额外挑战出现时先求解，再恢复验证码输入等待。
   - 该挑战沿用登录验证码的单阶段三次、全流程六次上限和认证硬超时；每次处理后只重置输入框渲染等待，不引入无限重试。
   - 按仓库规则不执行测试；Python 编译、diff 检查与调用链静态核对已通过。真实 Epic 登录仍需以后一次人工触发的 Actions 运行确认。
+
+### 2026-09-09 避免 hCaptcha 刷新空档触发密码重提失败
+
+- 现象：Actions run `34368572346` 已使用提交 `30b5a5c`，但在到达 MFA 前失败。两次登录的截图都停在密码阶段拖拽题并显示 `Please try again`；日志中一次 non-pass 后约半秒即报 `Epic password form could not be resubmitted after captcha`，另一次则成功继续到后续验证码，说明行为受 iframe 刷新时序影响。
+- 根因判断：密码定时重提分支位于验证码检测之前。hCaptcha 返回 non-pass 并刷新题目时，密码重提计时器已经到期；此时密码按钮仍受验证码阻挡，`_resubmit_password_form` 返回空值，旧逻辑却立即把它当成不可恢复的登录页错误，而没有落到紧随其后的验证码重试分支。
+- 改动文件：
+  - `app/services/epic_authorization_service.py`
+  - `docs/maintenance-log.md`
+- 处理结果：
+  - 定时密码重提只有实际提交成功才更新次数并进入下一轮；若仍能看到 hCaptcha widget，则记录状态并直接落到同轮的验证码检测与有界重试，不再误报密码表单损坏。
+  - 原有单阶段三次、全流程六次、密码重提三次和认证硬超时保持不变，不增加无限循环。
+  - 按仓库规则不执行测试；Python 编译、diff 检查与分支顺序静态核对已通过。真实 Epic 登录仍需以后一次人工触发的 Actions 运行确认。

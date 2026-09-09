@@ -1020,20 +1020,27 @@ class EpicAuthorization:
                         "Epic password form did not advance after bounded resubmission attempts"
                     )
                 submitted = await self._resubmit_password_form(agent)
-                if not submitted:
+                if submitted:
+                    password_resubmission_attempts += 1
+                    submission_generation = submitted
+                    last_password_resubmission_at = time.monotonic()
+                    logger.info(
+                        "Retried Epic password form after authentication remained on the login "
+                        "page | attempt={}/{}",
+                        password_resubmission_attempts,
+                        MAX_PASSWORD_RESUBMISSION_ATTEMPTS,
+                    )
+                    continue
+
+                if await self._has_visible_hcaptcha_widget():
+                    logger.debug(
+                        "Timed password resubmission is still blocked by hCaptcha; deferring to "
+                        "captcha recovery"
+                    )
+                else:
                     raise EpicLoginRestartRequiredError(
                         "Epic password form could not be resubmitted after captcha"
                     )
-                password_resubmission_attempts += 1
-                submission_generation = submitted
-                last_password_resubmission_at = time.monotonic()
-                logger.info(
-                    "Retried Epic password form after authentication remained on the login page | "
-                    "attempt={}/{}",
-                    password_resubmission_attempts,
-                    MAX_PASSWORD_RESUBMISSION_ATTEMPTS,
-                )
-                continue
 
             captcha_visible = await self._has_visible_hcaptcha_challenge()
             if not captcha_visible and submission_generation:
