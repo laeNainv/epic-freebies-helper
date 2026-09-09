@@ -1537,3 +1537,16 @@
   - Authenticator 定位范围加入常见交互角色和可聚焦元素；若卡片没有任何交互语义，则精确匹配可见的 `Authenticator App` 标签并点击，让事件冒泡到卡片处理器。
   - 为方式切换、交互式 Authenticator 和普通卡片三种点击路径记录不含敏感值的调试动作，便于下一次 Actions 明确判断页面走到了哪一步。
   - 按仓库规则不执行测试；Python 编译、diff 检查与选择器静态路径核对已通过。真实 Epic MFA 页面仍需新的单次 Actions 运行确认。
+
+### 2026-09-09 处理 Authenticator 入口后的额外 hCaptcha
+
+- 现象：Actions run `34364617559` 使用提交 `0d92ff6` 后，日志依次记录 `method_switcher` 和 `authenticator`，证明验证方式卡片已点击；此后却反复点击 Authenticator 并等待不到验证码输入框。失败截图显示方法选择之后弹出了新的拖拽 hCaptcha。
+- 根因判断：`submit_totp_challenge` 会同步等待验证码输入框，而已有的登录 hCaptcha 求解循环只有等该函数返回后才能运行；当 Epic 在 Authenticator 方法和验证码输入框之间插入安全挑战时，两段逻辑互相隔离，弹窗无人处理。
+- 改动文件：
+  - `app/services/epic_totp_service.py`
+  - `app/services/epic_authorization_service.py`
+  - `docs/maintenance-log.md`
+- 处理结果：
+  - TOTP 输入等待新增通用异步等待钩子；认证服务复用既有 Agent 和 hCaptcha 求解路径，在额外挑战出现时先求解，再恢复验证码输入等待。
+  - 该挑战沿用登录验证码的单阶段三次、全流程六次上限和认证硬超时；每次处理后只重置输入框渲染等待，不引入无限重试。
+  - 按仓库规则不执行测试；Python 编译、diff 检查与调用链静态核对已通过。真实 Epic 登录仍需以后一次人工触发的 Actions 运行确认。

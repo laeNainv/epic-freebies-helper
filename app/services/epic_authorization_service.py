@@ -831,7 +831,8 @@ class EpicAuthorization:
                 )
 
         async def submit_fresh_totp(reason: str) -> None:
-            nonlocal last_submission, submission_generation, captcha_attempts, captcha_rejections
+            nonlocal last_submission, submission_generation
+            nonlocal captcha_attempts, total_captcha_attempts, captcha_rejections
 
             if not totp_login_enabled():
                 raise EpicAuthenticationFatalError(reason)
@@ -866,12 +867,76 @@ class EpicAuthorization:
                 new_submission_generation = self._begin_login_submission()
                 self._drain_retryable_mfa_errors()
 
-            # Epic may create the hCaptcha payload immediately after the MFA submit click.
-            # Arm the response window before the button action so payload and checkcaptcha
-            # responses receive this submission's generation.
+            async def solve_totp_entry_captcha() -> bool:
+                nonlocal captcha_attempts, total_captcha_attempts, captcha_rejections
+
+                if not await self._has_visible_hcaptcha_challenge():
+                    return False
+
+                captcha_attempts += 1
+                total_captcha_attempts += 1
+                if (
+                    captcha_attempts > MAX_LOGIN_CAPTCHA_ATTEMPTS
+                    or total_captcha_attempts > MAX_LOGIN_CAPTCHA_ROUNDS
+                ):
+                    raise EpicLoginRestartRequiredError(
+                        "Epic MFA-entry hCaptcha exceeded the bounded retry limit"
+                    )
+
+                logger.warning(
+                    "MFA-entry captcha is visible before the authenticator code input; "
+                    "solving before continuing | attempt={}/{} total={}/{} current_url='{}'",
+                    captcha_attempts,
+                    MAX_LOGIN_CAPTCHA_ATTEMPTS,
+                    total_captcha_attempts,
+                    MAX_LOGIN_CAPTCHA_ROUNDS,
+                    self.page.url,
+                )
+                extend_deadline("mfa-entry-captcha", 180)
+                challenge_signal = await self._solve_login_captcha(
+                    agent,
+                    context="login_totp_entry",
+                    attempt=captcha_attempts,
+                    timeout_seconds=min(
+                        settings.EXECUTION_TIMEOUT + settings.RESPONSE_TIMEOUT + 5,
+                        max(1.0, deadline - time.monotonic()),
+                    ),
+                )
+                if challenge_signal is not ChallengeSignal.SUCCESS:
+                    logger.warning(
+                        "Epic MFA-entry hCaptcha did not succeed; retrying on the current "
+                        "page | attempt={}/{}",
+                        captcha_attempts,
+                        MAX_LOGIN_CAPTCHA_ATTEMPTS,
+                    )
+                    await self.page.wait_for_timeout(500)
+                    return True
+
+                captcha_rejections = 0
+                extend_deadline("mfa-entry-captcha-solved", 120)
+                if not await self._wait_for_hcaptcha_settle():
+                    raise EpicLoginRestartRequiredError(
+                        "Epic MFA-entry hCaptcha did not settle after a successful response"
+                    )
+
+                logger.info(
+                    "Epic MFA-entry hCaptcha cleared; resuming authenticator input wait"
+                )
+                # The scoped solve closes its response window. Re-arm tracking before the
+                # upcoming TOTP submit, which can immediately create another challenge.
+                await begin_captcha_attempt(agent, fresh=True)
+                await self.page.wait_for_timeout(500)
+                return True
+
+            # Epic may create an hCaptcha payload after method selection or the MFA submit click.
+            # Arm the response window before either action so payload and checkcaptcha responses
+            # receive this attempt's generation.
             await begin_captcha_attempt(agent, fresh=True)
             if not await submit_totp_challenge(
-                self.page, force_next_code=force_next_code, before_submit=before_totp_submit
+                self.page,
+                force_next_code=force_next_code,
+                before_submit=before_totp_submit,
+                wait_hook=solve_totp_entry_captcha,
             ):
                 if not self._is_mfa_page():
                     logger.warning(

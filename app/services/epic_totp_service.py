@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 
 import pyotp
@@ -320,10 +320,20 @@ async def redact_totp_inputs(page: Page) -> None:
         await _clear_totp_entry(page)
 
 
-async def _wait_for_totp_input(page: Page, timeout_ms: int = 20000) -> bool:
+async def _wait_for_totp_input(
+    page: Page,
+    timeout_ms: int = 20000,
+    wait_hook: Callable[[], Awaitable[bool]] | None = None,
+) -> bool:
     deadline = time.monotonic() + timeout_ms / 1000
 
     while time.monotonic() < deadline:
+        if wait_hook is not None and await wait_hook():
+            # A security challenge can take longer than the normal input-render timeout.
+            # Give the MFA form a fresh render window after the hook handles it.
+            deadline = time.monotonic() + timeout_ms / 1000
+            continue
+
         await _select_authenticator_mfa_method(page)
 
         if await _has_visible_totp_input(page, TOTP_INPUT_SELECTORS):
@@ -343,12 +353,16 @@ async def _wait_for_totp_input(page: Page, timeout_ms: int = 20000) -> bool:
 
 
 async def submit_totp_challenge(
-    page: Page, *, force_next_code: bool = False, before_submit: Callable[[], None] | None = None
+    page: Page,
+    *,
+    force_next_code: bool = False,
+    before_submit: Callable[[], None] | None = None,
+    wait_hook: Callable[[], Awaitable[bool]] | None = None,
 ) -> bool:
     if not totp_login_enabled():
         return False
 
-    if not await _wait_for_totp_input(page):
+    if not await _wait_for_totp_input(page, wait_hook=wait_hook):
         logger.error("Could not find Epic authenticator 2FA code input after waiting")
         return False
 
