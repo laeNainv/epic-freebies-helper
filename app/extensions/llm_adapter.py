@@ -60,9 +60,15 @@ GLM_VISUAL_COORDINATE_INSTRUCTION = (
 
 GLM_COMPLEX_DRAG_INSTRUCTION = (
     "For drag-path challenges, inspect the full scene before answering and count every movable "
-    "piece that must be placed. Return one paths entry per required move and never collapse a "
-    "multi-piece answer into a single path. When the prompt names a count such as TWO, the paths "
-    "array must contain exactly that many moves. Distinguish solid movable pieces from hollow or "
+    "piece that must actually be placed. Multiple draggable candidates do not imply multiple "
+    "moves: when the prompt asks for the correct shape and shows one blank target, choose only the "
+    "matching candidate and return exactly one path. Otherwise return one paths entry per required "
+    "move and never collapse a multi-piece answer into a single path. When the prompt names a count "
+    "such as TWO, the paths array must contain exactly that many moves. Use exactly this JSON shape: "
+    '{"challenge_prompt":"...","paths":[{"start_point":{"x":1,"y":2},'
+    '"end_point":{"x":3,"y":4}}]}. Both start_point and end_point must be objects containing '
+    "integer x and y fields; never return scalar coordinates, comma-separated strings, or bare "
+    "coordinate arrays. Distinguish solid movable pieces from hollow or "
     "outlined destinations, then pair each piece with its exact matching silhouette by shape, "
     "color, size, and orientation; do not pair objects merely because they share a row. For "
     "line-completion puzzles, follow the numbered endpoints in order and match each movable "
